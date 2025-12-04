@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -6,9 +6,12 @@ import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import Icon from '@/components/ui/icon';
 import { toast } from 'sonner';
+import { api } from '@/lib/api';
 
 export default function Index() {
-  const [applicationCount, setApplicationCount] = useState(127);
+  const [applicationCount, setApplicationCount] = useState(0);
+  const [settings, setSettings] = useState<any>(null);
+  const [twitchUser, setTwitchUser] = useState<any>(null);
   const [formData, setFormData] = useState({
     name: '',
     contact: '',
@@ -16,16 +19,86 @@ export default function Index() {
     about: ''
   });
 
-  const handleSubmit = (e: React.FormEvent) => {
+  useEffect(() => {
+    loadSettings();
+    loadApplicationCount();
+    
+    const urlParams = new URLSearchParams(window.location.search);
+    const code = urlParams.get('code');
+    if (code) {
+      handleTwitchCallback(code);
+    }
+  }, []);
+
+  const loadSettings = async () => {
+    try {
+      const data = await api.getSettings();
+      setSettings(data);
+    } catch (error) {
+      console.error('Failed to load settings:', error);
+    }
+  };
+
+  const loadApplicationCount = async () => {
+    try {
+      const data = await api.getApplications();
+      setApplicationCount(data.total || 0);
+    } catch (error) {
+      console.error('Failed to load applications:', error);
+    }
+  };
+
+  const handleTwitchCallback = async (code: string) => {
+    try {
+      const data = await api.getTwitchUser(code);
+      setTwitchUser(data.user);
+      setFormData(prev => ({
+        ...prev,
+        name: data.user.display_name || data.user.login,
+        twitchLink: `twitch.tv/${data.user.login}`
+      }));
+      toast.success(`Привет, ${data.user.display_name}! 👋`);
+      window.history.replaceState({}, '', '/');
+    } catch (error) {
+      toast.error('Ошибка авторизации через Twitch');
+      console.error(error);
+    }
+  };
+
+  const handleTwitchLogin = async () => {
+    try {
+      const data = await api.getTwitchAuthUrl();
+      window.location.href = data.auth_url;
+    } catch (error) {
+      toast.error('Ошибка подключения к Twitch');
+      console.error(error);
+    }
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formData.name || !formData.contact) {
       toast.error('Заполни имя и контакт, братух!');
       return;
     }
     
-    setApplicationCount(prev => prev + 1);
-    toast.success('Заявка отправлена в стаю! 🚀');
-    setFormData({ name: '', contact: '', twitchLink: '', about: '' });
+    try {
+      await api.createApplication({
+        name: formData.name,
+        contact: formData.contact,
+        twitch_link: formData.twitchLink,
+        about: formData.about,
+        twitch_user: twitchUser
+      });
+      
+      setApplicationCount(prev => prev + 1);
+      toast.success('Заявка отправлена в стаю! 🚀');
+      setFormData({ name: '', contact: '', twitchLink: '', about: '' });
+      setTwitchUser(null);
+    } catch (error) {
+      toast.error('Ошибка отправки заявки');
+      console.error(error);
+    }
   };
 
   const scrollToForm = () => {
@@ -143,7 +216,11 @@ export default function Index() {
                 <Icon name="AlertCircle" size={20} />
                 Организатор:
               </p>
-              <p className="text-destructive font-black text-lg">НЕ НАСТРОЕНО</p>
+              {settings?.organizer_name ? (
+                <p className="font-black text-lg">{settings.organizer_name}</p>
+              ) : (
+                <p className="text-destructive font-black text-lg">НЕ НАСТРОЕНО</p>
+              )}
             </div>
           </Card>
         </div>
@@ -191,6 +268,23 @@ export default function Index() {
           </div>
 
           <Card className="p-8 bg-card/50">
+            {twitchUser && (
+              <div className="mb-6 flex items-center gap-4 p-4 bg-primary/10 rounded-lg border border-primary/30">
+                <img src={twitchUser.profile_image_url} alt={twitchUser.display_name} className="w-12 h-12 rounded-full" />
+                <div>
+                  <p className="font-bold">{twitchUser.display_name}</p>
+                  <p className="text-sm text-muted-foreground">{twitchUser.email}</p>
+                </div>
+              </div>
+            )}
+            
+            {!twitchUser && (
+              <Button type="button" onClick={handleTwitchLogin} variant="outline" className="w-full mb-6 border-2 border-primary">
+                <Icon name="Twitch" className="mr-2" />
+                Войти через Twitch
+              </Button>
+            )}
+            
             <form onSubmit={handleSubmit} className="space-y-6">
               <div>
                 <label className="block text-sm font-medium mb-2">
